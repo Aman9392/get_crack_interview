@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   saveApiKey: (key) => ipcRenderer.invoke(EVENT_CONSTANTS.SAVE_API_KEY, key),
   loadApiKey: () => ipcRenderer.invoke(EVENT_CONSTANTS.LOAD_API_KEY),
   getSttApiKey: () => ipcRenderer.invoke(EVENT_CONSTANTS.GET_STT_API_KEY),
+  getSttRegion: () => ipcRenderer.invoke(EVENT_CONSTANTS.GET_STT_REGION),
   checkScreenPermission: () =>
     ipcRenderer.invoke(EVENT_CONSTANTS.CHECK_SCREEN_PERMISSION),
 });

@@ -25,6 +25,11 @@ export class MainWindowManager {
       hasShadow: false,
       webPreferences: {
         preload: path.join(__dirname, "preload.js"),
+        webSecurity: false,
+        allowRunningInsecureContent: true,
+        experimentalFeatures: true,
+        nodeIntegration: false,
+        contextIsolation: true,
       },
     };
   }
@@ -33,7 +38,10 @@ export class MainWindowManager {
     const options = this.getBrowserWindowOptions();
     this.mainWindow = new BrowserWindow(options);
 
+    // this.mainWindow.setHiddenInMissionControl(true);
+     if (process.platform === "darwin" && this.mainWindow.setHiddenInMissionControl) {
     this.mainWindow.setHiddenInMissionControl(true);
+   }
     this.mainWindow.setVisibleOnAllWorkspaces(true, {
       visibleOnFullScreen: true,
     });
@@ -62,7 +70,7 @@ export class MainWindowManager {
     }
 
     this.mainWindow.webContents.on("did-finish-load", onReady);
-    // this.mainWindow.webContents.openDevTools({ mode: "detach" });
+    //this.mainWindow.webContents.openDevTools({ mode: "detach" });
   }
 
   getWindow() {

@@ -65,29 +65,32 @@ const Chat = () => {
     }
   };
 
+  // Track the latest query with a unique ID
+  let latestQueryId = useRef(0);
   const makeQuery = async (query) => {
+    abort();
+    reset();
+    setIsLoading(false);
+    setError(null);
+
     if (query === "reset") {
-      abort();
-      reset();
       setAnswer("");
-      setIsLoading(false);
-      setError(null);
       setLastQuery("");
       setChatStep(STEPS.INPUT);
       resetConversation();
       return;
     }
 
-    const controller = createNewController();
+    // Increment query ID for each new query
+    latestQueryId.current += 1;
+    const thisQueryId = latestQueryId.current;
+    setAnswer(""); // Clear answer for new query
     setLastQuery(query);
     setIsLoading(true);
-    setAnswer("");
-    setError(null);
 
     if (!apiKey) {
-      setAnswer("");
-      setIsLoading(false);
       setError("API key was not provided");
+      setIsLoading(false);
       reset();
       return;
     }
@@ -95,27 +98,36 @@ const Chat = () => {
     const hasPermission = await electronAPI.checkScreenPermission();
 
     if (!hasPermission) {
-      setAnswer("");
-      setIsLoading(false);
       setError("Please provide screen capture permission to cogni");
+      setIsLoading(false);
       reset();
       return;
     }
 
+    const controller = createNewController();
     openaiChatStream({
       apiKey,
       userMessage: query,
       signal: controller.signal,
-      onChunk: (chunk) => setAnswer((prev) => prev + chunk),
+      onChunk: (chunk) => {
+        // Only update answer if this is the latest query
+        if (latestQueryId.current === thisQueryId) {
+          setAnswer((prev) => prev + chunk);
+        }
+      },
       onFinish: () => {
-        setIsLoading(false);
-        reset();
+        if (latestQueryId.current === thisQueryId) {
+          setIsLoading(false);
+          reset();
+        }
       },
       onError: (error) => {
-        setAnswer("");
-        setIsLoading(false);
-        setError(error);
-        reset();
+        if (latestQueryId.current === thisQueryId) {
+          setAnswer("");
+          setIsLoading(false);
+          setError(error);
+          reset();
+        }
       },
     });
   };

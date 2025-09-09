@@ -64,12 +64,84 @@ const Audio = () => {
     toggle();
     setStreamingText("");
     const STT_API_KEY = await electronAPI.getSttApiKey();
+    const STT_REGION = await electronAPI.getSttRegion();
+    if (!STT_API_KEY || STT_API_KEY === "YOUR_AZURE_SPEECH_KEY") {
+      // Free path: use Web Speech API (no key, no downloads)
+      try {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SpeechRecognition) {
+          setStreamingText("Web Speech API not supported in this browser.");
+          return;
+        }
+        const recognition = new SpeechRecognition();
+        recognition.lang = "en-US";
+        recognition.interimResults = true;
+        recognition.maxAlternatives = 1;
+        recognition.continuous = false;
+
+        recognition.onresult = (e) => {
+          const finalResult = Array.from(e.results)
+            .find(r => r.isFinal);
+          if (finalResult) {
+            const text = finalResult[0]?.transcript?.trim() || "";
+            setStreamingText(text);
+            if (text) {
+              setGlobalInputValue(text);
+              setChatStep(STEPS.INPUT);
+              toggle();
+              toggleChatBox();
+            }
+          } else {
+            const interimText = Array.from(e.results)
+              .map((r) => r[0]?.transcript || "")
+              .join(" ")
+              .trim();
+            setStreamingText(interimText || "Listening...");
+          }
+        };
+
+        recognition.onerror = (e) => {
+          console.error("Speech recognition error:", e.error);
+          if (e.error === "network") {
+            setStreamingText("Network error. Check internet connection or try typing instead.");
+          } else if (e.error === "not-allowed") {
+            setStreamingText("Microphone permission denied. Allow microphone access and try again.");
+          } else if (e.error === "no-speech") {
+            setStreamingText("No speech detected. Try speaking louder or closer to microphone.");
+          } else {
+            setStreamingText(`Speech error: ${e.error}. Try typing instead.`);
+          }
+          setIsRecording(false);
+        };
+
+        recognition.onend = () => {
+          setIsRecording(false);
+        };
+
+        recognition.start();
+        setStreamingText("Listening (free)...");
+
+        // Add timeout to prevent hanging
+        setTimeout(() => {
+          if (isRecording) {
+            recognition.stop();
+            setStreamingText("Speech timeout. Try typing instead.");
+            setIsRecording(false);
+          }
+        }, 10000); // 10 second timeout
+
+        return;
+      } catch (err) {
+        setStreamingText("Microphone permission denied or unsupported.");
+      }
+      return;
+    }
     setIsRecording(true);
 
     navigator.mediaDevices.getUserMedia({ audio: true }).then(() => {
       const speechConfig = speechsdk.SpeechConfig.fromSubscription(
         STT_API_KEY,
-        "eastus"
+        STT_REGION
       );
 
       speechConfig.speechRecognitionLanguage = "en-US";
@@ -79,6 +151,21 @@ const Audio = () => {
         speechConfig,
         audioConfig
       );
+
+      recognizer.canceled = (s, e) => {
+        const details = e.errorDetails || "Speech canceled";
+        console.error("Speech canceled:", details);
+        setStreamingText(`Speech error: ${details}`);
+        setIsRecording(false);
+      };
+
+      recognizer.sessionStarted = () => {
+        // no-op, but useful to confirm session
+      };
+
+      recognizer.sessionStopped = () => {
+        // no-op
+      };
 
       recognizer.recognizing = async (s, e) => {
         setStreamingText(e.result.text);
@@ -94,6 +181,11 @@ const Audio = () => {
             toggle();
             toggleChatBox();
           }
+        } else if (result.reason === ResultReason.Canceled) {
+          const cancellation = speechsdk.CancellationDetails.fromResult(result);
+          const details = cancellation.errorDetails || "Canceled";
+          console.error("Recognize canceled:", details);
+          setStreamingText(`Speech error: ${details}`);
         }
       });
     });

@@ -25,18 +25,22 @@ export async function openaiChatStream({
 
     addUserMessage(userMessage, image);
 
-    const openai = createOpenAI({ apiKey });
-
+    // Use only Ollama via its OpenAI-compatible local endpoint
+    const openai = createOpenAI({
+      apiKey: "ollama", // ignored by Ollama
+      baseURL: "http://localhost:11434/v1",
+    });
+    //const model = openai("llama3.1");
+    const model = openai("llama3.2:1b");
     const { textStream, fullStream } = streamText({
-      model: openai("gpt-4-turbo"),
+      model,
       messages: getConversationHistory(),
       onError: () => {
         onError?.(
-          "Error fetching data. Please verify your API key is correct and try again."
+          "Error fetching data. Ensure Ollama is running at http://localhost:11434 and model 'llama3.2:1b' is pulled."
         );
       },
     });
-
     let assistantReply = "";
 
     (async () => {

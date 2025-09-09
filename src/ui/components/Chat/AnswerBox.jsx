@@ -15,7 +15,7 @@ import { electronAPI } from "../../utils";
 
 const AnswerBox = ({ coords, makeQuery }) => {
   const { chatStep, setChatStep } = useChat();
-  const { answer, isLoading, lastQuery, error } = useAnswer();
+  const { answer, isLoading, lastQuery, error, setAnswer } = useAnswer();
   const loading = isLoading && !answer;
   const containerRef = useMouseForwarding();
   const answerAreaRef = useRef();
@@ -24,6 +24,14 @@ const AnswerBox = ({ coords, makeQuery }) => {
   const handleCloseButton = () => {
     closeAllPopovers();
     setChatStep(STEPS.INPUT);
+    abort();
+  };
+
+  const handleClearButton = () => {
+    setAnswer("");
+  };
+
+  const handleStopButton = () => {
     abort();
   };
   useEffect(() => {
@@ -50,13 +58,17 @@ const AnswerBox = ({ coords, makeQuery }) => {
             <div></div>
           )}
 
-          <CloseButton
-            shouldAllowMouseForwarding={false}
-            disappearing={true}
-            onClick={handleCloseButton}
-          >
-            <X size={10} />
-          </CloseButton>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <CloseButton
+              shouldAllowMouseForwarding={false}
+              disappearing={true}
+              onClick={handleCloseButton}
+            >
+              <X size={10} />
+            </CloseButton>
+            <IconButton onClick={handleClearButton} title="Clear Response">Clear</IconButton>
+            <IconButton onClick={handleStopButton} title="Stop Response">Stop</IconButton>
+          </div>
         </Header>
         {error ? (
           <div>{error}</div>
