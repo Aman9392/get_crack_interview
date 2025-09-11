@@ -3,8 +3,7 @@ import styled from "styled-components";
 import { AudioLines } from "lucide-react";
 import ReactDOM from "react-dom";
 
-import * as speechsdk from "microsoft-cognitiveservices-speech-sdk";
-import { ResultReason } from "microsoft-cognitiveservices-speech-sdk";
+// Removed Azure and Web Speech API imports
 import { useRecording } from "../hooks/useRecording";
 import { electronAPI } from "../utils";
 import { useMouseForwarding } from "../hooks/useMouseForwarding";
@@ -36,6 +35,10 @@ const Audio = () => {
   const { isRecording, setIsRecording } = useRecording();
   const [streamingText, setStreamingText] = useState("");
   const { setGlobalInputValue } = useChat();
+  // Add a ref to store the latest transcribed text
+  const latestTranscribedText = useRef("");
+  // Dynamically import makeQuery from Chat component
+  const [makeQuery, setMakeQuery] = useState(null);
 
   const { isOpen, toggle } = usePopover(4);
   const { toggle: toggleChatBox } = usePopover(2);
@@ -50,6 +53,15 @@ const Audio = () => {
     }
   }, [isOpen]);
 
+  // Dynamically import makeQuery from Chat only once
+  useEffect(() => {
+    import("./Chat/Chat.jsx").then(mod => {
+      if (mod && typeof mod.makeQuery === "function") {
+        setMakeQuery(() => mod.makeQuery);
+      }
+    }).catch(() => {});
+  }, []);
+
   useEffect(() => {
     const handleShortcut = (accelerator) => {
       if (accelerator === "CMD_L") {
@@ -59,142 +71,68 @@ const Audio = () => {
     electronAPI.onKeyBoardShortcut(handleShortcut);
   }, []);
 
+  // Only use Whisper/MediaRecorder for voice input
   const startRecording = async () => {
     if (isRecording) return;
     toggle();
     setStreamingText("");
-    const STT_API_KEY = await electronAPI.getSttApiKey();
-    const STT_REGION = await electronAPI.getSttRegion();
-    if (!STT_API_KEY || STT_API_KEY === "YOUR_AZURE_SPEECH_KEY") {
-      // Free path: use Web Speech API (no key, no downloads)
-      try {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) {
-          setStreamingText("Web Speech API not supported in this browser.");
-          return;
-        }
-        const recognition = new SpeechRecognition();
-        recognition.lang = "en-US";
-        recognition.interimResults = true;
-        recognition.maxAlternatives = 1;
-        recognition.continuous = false;
-
-        recognition.onresult = (e) => {
-          const finalResult = Array.from(e.results)
-            .find(r => r.isFinal);
-          if (finalResult) {
-            const text = finalResult[0]?.transcript?.trim() || "";
-            setStreamingText(text);
-            if (text) {
-              setGlobalInputValue(text);
-              setChatStep(STEPS.INPUT);
-              toggle();
-              toggleChatBox();
-            }
-          } else {
-            const interimText = Array.from(e.results)
-              .map((r) => r[0]?.transcript || "")
-              .join(" ")
-              .trim();
-            setStreamingText(interimText || "Listening...");
-          }
-        };
-
-        recognition.onerror = (e) => {
-          console.error("Speech recognition error:", e.error);
-          if (e.error === "network") {
-            setStreamingText("Network error. Check internet connection or try typing instead.");
-          } else if (e.error === "not-allowed") {
-            setStreamingText("Microphone permission denied. Allow microphone access and try again.");
-          } else if (e.error === "no-speech") {
-            setStreamingText("No speech detected. Try speaking louder or closer to microphone.");
-          } else {
-            setStreamingText(`Speech error: ${e.error}. Try typing instead.`);
-          }
-          setIsRecording(false);
-        };
-
-        recognition.onend = () => {
-          setIsRecording(false);
-        };
-
-        recognition.start();
-        setStreamingText("Listening (free)...");
-
-        // Add timeout to prevent hanging
-        setTimeout(() => {
-          if (isRecording) {
-            recognition.stop();
-            setStreamingText("Speech timeout. Try typing instead.");
-            setIsRecording(false);
-          }
-        }, 10000); // 10 second timeout
-
-        return;
-      } catch (err) {
-        setStreamingText("Microphone permission denied or unsupported.");
-      }
-      return;
-    }
     setIsRecording(true);
 
-    navigator.mediaDevices.getUserMedia({ audio: true }).then(() => {
-      const speechConfig = speechsdk.SpeechConfig.fromSubscription(
-        STT_API_KEY,
-        STT_REGION
-      );
-
-      speechConfig.speechRecognitionLanguage = "en-US";
-
-      const audioConfig = speechsdk.AudioConfig.fromDefaultMicrophoneInput();
-      const recognizer = new speechsdk.SpeechRecognizer(
-        speechConfig,
-        audioConfig
-      );
-
-      recognizer.canceled = (s, e) => {
-        const details = e.errorDetails || "Speech canceled";
-        console.error("Speech canceled:", details);
-        setStreamingText(`Speech error: ${details}`);
-        setIsRecording(false);
-      };
-
-      recognizer.sessionStarted = () => {
-        // no-op, but useful to confirm session
-      };
-
-      recognizer.sessionStopped = () => {
-        // no-op
-      };
-
-      recognizer.recognizing = async (s, e) => {
-        setStreamingText(e.result.text);
-      };
-
-      recognizer.recognizeOnceAsync((result) => {
-        setIsRecording(false);
-        if (result.reason === ResultReason.RecognizedSpeech) {
-          const text = result.text;
-          if (text) {
-            setGlobalInputValue(text);
-            setChatStep(STEPS.INPUT);
-            toggle();
-            toggleChatBox();
-          }
-        } else if (result.reason === ResultReason.Canceled) {
-          const cancellation = speechsdk.CancellationDetails.fromResult(result);
-          const details = cancellation.errorDetails || "Canceled";
-          console.error("Recognize canceled:", details);
-          setStreamingText(`Speech error: ${details}`);
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mediaRecorder = new MediaRecorder(stream);
+    let chunks = [];
+    mediaRecorder.ondataavailable = e => chunks.push(e.data);
+    mediaRecorder.onstop = async () => {
+      const audioBlob = new Blob(chunks, { type: 'audio/wav' });
+      setStreamingText("Transcribing...");
+      try {
+        const text = await transcribeAudio(audioBlob);
+        setStreamingText(text); // Show transcription immediately
+        latestTranscribedText.current = text;
+        if (text) {
+          setGlobalInputValue(text);
+          setChatStep(STEPS.INPUT);
+          toggle();
+          toggleChatBox();
+          // Wait a short moment for UI update, then send to model
+          setTimeout(() => {
+            if (makeQuery) makeQuery(text);
+          }, 500);
         }
-      });
-    });
+      } catch (err) {
+        setStreamingText("Transcription failed.");
+      }
+      setIsRecording(false);
+    };
+    mediaRecorder.start();
+
+    // Stop recording after 10 seconds
+    setTimeout(() => {
+      if (mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+      }
+      setIsRecording(false);
+    }, 10000);
   };
+
+  async function transcribeAudio(audioBlob) {
+    //console.log(audioBlob.type);
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'audio.webm');
+    const response = await fetch('http://localhost:5000/transcribe', {
+      method: 'POST',
+      body: formData
+    });
+    const data = await response.json();
+    return data.text;
+  }
+
+  // handleMediaRecorder removed; all logic is in startRecording
 
   return (
     <>
       <ButtonContainer ref={buttonRef}>
-        <SolidButton disabled={isRecording} onClick={startRecording}>
+  <SolidButton disabled={isRecording} onClick={startRecording}>
           <ButtonContent>
             <span>{isRecording ? "Listening" : "Listen"}</span>
             <ShortcutGroup>

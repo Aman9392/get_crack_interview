@@ -30,7 +30,6 @@ export async function openaiChatStream({
       apiKey: "ollama", // ignored by Ollama
       baseURL: "http://localhost:11434/v1",
     });
-    //const model = openai("llama3.1");
     const model = openai("llama3.2:1b");
     const { textStream, fullStream } = streamText({
       model,
